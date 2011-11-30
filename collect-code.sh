@@ -1,6 +1,7 @@
 #!/bin/bash
 
 cp /var/pictures/pictures/index.html web/ 
+cp /var/pictures/pictures/spinner.gif web/ 
 cp /var/pictures/pictures/*.js web/ 
 
 cp /usr/local/nginx/conf/nginx.conf nginx/conf
