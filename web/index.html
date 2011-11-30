@@ -1,0 +1,492 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head>
+<title>Photos</title>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" /> 
+<style>
+.topbar{
+	position: fixed;
+	top: 0;
+	height: 100px;
+	width: 100%;
+	font-size: 12px;
+	font-family: sans-serif;
+}
+#control {
+	border: none;
+ 	position: absolute;
+	display: none;
+	text-shadow: 1px white;
+	font-size: 30px;
+	font-family: sans-serif;
+	z-index: 1001;
+}
+#control table td{
+	border: 1px solid white;
+	width: 50px;
+	height: 50px;
+	text-align: center;
+	color: white;
+	background-color: gray;
+
+}
+
+
+#title {
+	z-index: 500;
+}
+
+#titletext {
+	font-size: 30px;
+	font-family: sans-serif;
+}
+
+.spinner {
+    background: url('spinner.gif') no-repeat center center;
+}
+
+.photos {
+	position: absolute;
+	display: none;
+}
+.photos img {
+	width: 100%;
+	height: 100%;
+};
+</style>
+<script type="text/javascript" src="jquery.js" ></script>
+<script type="text/javascript" src="cache.js" ></script>
+<script type="text/javascript">
+    //<![CDATA[
+    $(function(){
+      var cell = 220 ;
+      var topBar = 100 ;
+      var viewSize = 1024 ;
+      var margin = 80 ;
+
+      var rootUrl = location.href.replace(/#[^#]+$/,"");
+      var cache = new Cache ( 128 );
+      
+      var displayedImages = null;
+	  var zoomedImage = null;
+
+      var resizeTimeout;
+      $(window).resize(function(){
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(recalculateThumbPositions, 100);
+      });
+      $(window).scroll(function(){
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(populateVisibleImages, 150);
+      });
+      
+  	   $(".arrow").click(function(){
+   	     nextPicture(this.id);
+   	   });
+
+
+      $(window).bind( 'hashchange', function(){
+	    displayedImages = null;
+		getIndex(location.hash.substr(1), function (images){ displayedImages = images; zoomedImage = null; displayImages();});    	    
+   	  });
+	  
+   	  $(window).trigger('hashchange');
+     
+   	  function getIndex(album, callback){
+        var k =  album ?album : "root_album";
+        var v = cache.getItem(k);
+        if( v ){
+          callback(v);
+        }else{
+	   		var baseUrl = rootUrl + album + "/";
+	   		$.getJSON(baseUrl+"index.json", function (out){
+	   		  out.baseUrl = baseUrl;  
+	          cache.setItem(k, out, 
+	              {expirationAbsolute: null,   
+	          	   expirationSliding: 128,   
+	          	   priority: CachePriority.High,  
+	               callback: null
+	          });
+	          callback(out);
+	        });   
+   	  	}
+	  }
+   	  
+   	  function findImage(n,callback){
+   	    if(n.type=="album"){
+   	      getIndex(n.name,function(index){findImage(setUpImage(index, index.highlight),callback);})
+   	    }else{
+   	      callback(n);
+   	    }
+   	  }
+   	  
+   	  
+   	 $(document).keydown(function (e) {
+   	  var code = e.keyCode || e.charCode;
+   	  switch(code){
+   	  case 38:
+   	    e.preventDefault();
+   	    nextPicture("up");
+   	    break;
+   	  case 40:
+   	   e.preventDefault();
+   	    nextPicture("down");
+   	    break;
+   	  case 37:
+   	   e.preventDefault();
+   	    nextPicture("left");
+   	    break;
+   	  case 32:
+   	  case 39:
+   	   e.preventDefault();
+   	    nextPicture("right");
+   	    break;
+   	  case 27:
+   	   e.preventDefault();
+   	    zoomIn();
+   	    break;
+   	  default:
+   	    fireMouseMove();
+   	  }
+   	 });
+   	
+   	  function nextPicture(direction){
+		if(zoomedImage != null){
+		  var current = zoomedImage.i;
+		  switch(direction){
+		  case "up":
+		    current -= columnCount;
+		    break;
+		  case "down":
+		    current += columnCount;
+		    break;
+		  case "left":
+		    current --;
+		    break;
+		  case "right":
+		    current ++;
+		    break;
+		  }
+		  if( current < 0 ){
+		    current = 0 ;
+		  }else if( current >= displayedImages.images.length ){
+		    current = displayedImages.images.length - 1 ;
+		  }	  		  
+		  if( current != zoomedImage.i ){
+		    zoomIn(function(){
+		      var img = displayedImages.images[current];
+		      var w = $(window);
+		      if ( w.scrollTop() > img.thumb.position[1] ){
+		      	 $('html,body').animate({scrollTop: (img.thumb.position[1]-margin) },'fast',function(){zoomOut(img);});
+		      }else  if ( (w.scrollTop()+w.height()) < img.thumb.position[1] ){
+		      	 $('html,body').animate({scrollTop: (img.thumb.position[1]+img.thumb.size[1]+margin-w.height()) },'fast',function(){zoomOut(img);});
+		      }else{
+			      zoomOut(img);
+		      }
+		    });
+		  }
+		}   	    
+   	  }
+   	  
+   	  function displayImages() {
+       var list = "";
+	   $("#title").css({height: topBar})
+	   .html("<div id='titletext'>"+displayedImages.title+"</div>" + ( !displayedImages.parent ? "" :
+	       "Parent album: <a href='"+rootUrl+"#"+displayedImages.parent+"'> "+displayedImages.parent+"</a>" )
+	       );
+ 	   $("#control").css("display", "none");
+	   $(window).scrollTop(0);
+
+	   displayedImages.waitInitialization=function(callback){
+	     var index = this;
+	     setTimeout(function(){
+	       var allInitialized = true;
+	       for(var i = 0; i < index.images.length; i++) {
+	         if( !index.images[i].initialized){
+	           allInitialized = false;
+	           break;
+	         }
+	       }
+	       if(allInitialized){
+	         callback(index);
+	       }else{
+	         index.waitInitialization(callback);
+	       }
+	     },300);
+	   }
+	   allImages(function(img,i){
+         setUpImage(displayedImages, img);
+         img.i = i;
+         img.divid = function() { return "img"+this.i; }
+         img.isSpinner = function() { return $("#"+this.divid()).is(".spinner");}
+
+         list += "<div class='photos spinner' id='"+img.divid()+"' />";
+         img.initialized=false;
+         img.initInternal = function(){
+           if(this.thumb == null){
+	           this.thumb={};
+	           this.thumb.size = this.o.calcWidth(cell);
+	           this.thumb.src = this.o.resizeToUrl(this.thumb.size[0]);
+           }
+           $("#"+this.divid()).click(function(){
+              var img = displayedImages.images[parseInt(this.id.substring(3))];
+              if( img.type == "album" ){
+                location.hash = "#"+img.name ;
+              }else{
+    		    if(zoomedImage == null){
+    		      zoomOut(img);
+    		    }else if( zoomedImage == img ){
+    		      zoomIn();
+    		    }else{
+    		      zoomIn(function(){zoomOut(img);});
+    		    }
+              }
+           });
+           this.initialized=true;
+         };
+       	 img.init= function (){
+           findImage( this,function(o){
+             img.o=o;
+             img.initInternal();
+           });
+       	 };
+	   });	   
+       $("#main").html(list) ; 
+  	   allImages(function(img){ img.init(); });
+       displayedImages.waitInitialization(recalculateThumbPositions);
+	 }
+
+  	  var controlPosition = null;
+  	  var controlTimeout = null;
+
+  	  function fireMouseMove(){
+   	    if(controlPosition!=null){
+  	  	  $("#control").fadeTo(0,0.5)
+	   	    .css({
+	   	      left:controlPosition[0],
+			  top: controlPosition[1],
+			  display: "block",
+	   	      });
+  	  	  $(".arrow").fadeTo(0,1);
+  	  	  if( zoomedImage.i == 0 ){
+  	  	  	$(".hideonfirst").fadeTo(0,0);
+  	  	  }else if (zoomedImage.i == displayedImages.images.length - 1){
+  	  	  	$(".hideonlast").fadeTo(0,0);
+  	  	  }
+   	    }
+   	 }
+   	  function setUpImage(index, img){
+   	    if(!img.baseUrl){
+  	     if(img.type=="image"){
+	   	   img.baseUrl = index.baseUrl ;
+	       img.resizeToUrl = function(w){ 
+	         return this.baseUrl + this.name +".resize_to."+w+"x0"+ this.ext;
+	       }
+	       img.calcWidth = function(max){ 
+             return this.width < this.height ? [parseInt( this.width * max / this.height ),max] : [max,parseInt( this.height * max / this.width)]; 
+           }
+	       img.calcDimentions = function(w,h){ 
+             var widthBasedOnHeight = parseInt( this.width  * h / this.height );
+             return w < widthBasedOnHeight ? [w, parseInt( this.height * w / this.width )] : [widthBasedOnHeight, h] ;
+           }  	    
+         }
+   	    }
+        return img;
+   	  }
+   	  
+   	 function allImages(f){
+       if( displayedImages != null ){
+	       for(var i = 0; i < displayedImages.images.length; i++) {
+	         var img = displayedImages.images[i];
+	       	 f(img,i);
+	       }
+       }
+   	 }
+
+   	var columnCount = null;
+   	
+   	function recalculateThumbPositions(){
+       if( displayedImages != null ){
+		 var w = $(window);
+         columnCount = parseInt( w.width() / ( cell + margin ) );
+         var gap = parseInt( (w.width() - columnCount * cell)/(columnCount+1) );
+         var top = topBar;
+         var lastRow = 0 ;
+         var maxHeightOnRow = 0 ;
+         allImages(function(img,i){
+           var row = parseInt( i / columnCount );
+           var col = i % columnCount ;
+           if( row != lastRow ){ // new row
+             top += gap + maxHeightOnRow ;
+           	 lastRow = row;
+           	 maxHeightOnRow = 0;
+           }
+           if(img.thumb.size[1] > maxHeightOnRow){
+             maxHeightOnRow = img.thumb.size[1] ;
+           }
+           var left = (gap * (col+1) + cell * col) ;
+           var correction = parseInt((cell-img.thumb.size[0])/2);
+           img.thumb.position = [left+correction,top];
+         }); 
+         top += gap + maxHeightOnRow ;
+		 $("#log").css({
+		    position: "absolute",
+         	top: top ,
+		 });
+		 
+         populateVisibleImages();
+         layoutImages();
+         animateZoomedImage();
+       }
+   	 }
+   	
+   	
+   	 function populateVisibleImages(){
+   	  var w = $(window);
+   	  var cutoff = w.scrollTop() + w.height();
+      allImages(function(img){
+        if(img.isSpinner()){
+          var imgBottom = img.thumb.position[1];
+	        if ( imgBottom < cutoff) {
+			       downloadImage(img.thumb, img);
+	        }
+        }
+      });
+   	 }
+   	 
+   	 function layoutImages(){
+         allImages(function(img){
+           var elem = $("#"+img.divid());
+           if( img != zoomedImage){
+             elem.css({
+	           display: "block",
+	           width: "" +img.thumb.size[0] + "px" ,
+	           height: "" +img.thumb.size[1] + "px" ,
+	           left: "" +img.thumb.position[0] + "px" ,
+	           top: "" + img.thumb.position[1] + "px" ,
+	           "z-index" : "1", 
+	         });
+             elem.fadeTo(0,zoomedImage != null? 0.3 : 1);
+           }else{
+		     if(img.sized == null){
+		       img.sized = {} ;
+		       img.sized.src = img.o.resizeToUrl(viewSize) ;
+		       downloadImage(img.sized, img);
+		     }
+			 var w = $(window);
+			 var imgDims = img.o.calcDimentions(Math.min(viewSize,w.width()-margin), w.height()-margin ) ;
+			 var left = parseInt((w.width() - imgDims[0])/2);
+			 var top = w.scrollTop()+parseInt((w.height()-imgDims[1])/2);
+		     img.sized.size = imgDims ;
+		     img.sized.position = [left, top];
+			 controlPosition=[left + imgDims[0] - 174, top + imgDims[1] - 116];
+			 elem
+   		     .fadeTo(0,1)
+			 .css({
+			   "z-index": "1000"
+			   });
+			  
+           }
+         });
+     }
+
+ 	 function animateZoomedImage(f){
+	   var elem = null;
+ 	   if(zoomedImage!=null){
+ 		elem = $("#"+zoomedImage.divid());
+ 		elem.animate({
+ 		   left: zoomedImage.sized.position[0],
+ 		   top: zoomedImage.sized.position[1],
+ 		   width: zoomedImage.sized.size[0],
+ 		   height: zoomedImage.sized.size[1],
+ 		  }, function() {
+	      if(f != null) f();
+		});
+ 	   }
+	   return elem;
+ 	 }
+ 	 
+ 	 function zoomIn(f){
+ 	   if(zoomedImage!=null){
+	       var o = $("#"+zoomedImage.divid());
+	       o.unbind({
+	         mousemove: fireMouseMove,
+	         });
+	  	   $("#control").css("display", "none");
+	       o.animate({
+			  left: zoomedImage.thumb.position[0],
+			  top: zoomedImage.thumb.position[1],
+			  width: zoomedImage.thumb.size[0],
+			  height: zoomedImage.thumb.size[1],
+			}, function() {
+		      zoomedImage = null;
+		      layoutImages();
+		      if(f != null) f();
+			});
+ 	   }else{
+	      if(f != null) f();
+ 	   }
+	 } 
+	 function zoomOut(img){
+		zoomedImage = img;
+	    layoutImages();
+	    animateZoomedImage().mousemove(fireMouseMove);
+	 }
+	 
+   	 function downloadImage(derived,img){
+       if( derived.cache == null ){
+	       derived.cache = new Image();
+	       derived.cache.src = derived.src;
+	       derived.isDownloaded = function() { return this.cache.complete || (this.cache.height && this.cache.height > 0); };
+       }
+   	   if ( derived.isDownloaded() ) {
+         setImage(derived, img);
+       } else {
+         derived.cache.onload = function() { setImage(derived, img); }
+       }
+   	 }
+
+   	  function setImage(derived, img){
+        var imgTag = $("#"+img.divid());
+        if(derived.size != null){
+          imgTag.css({
+ 	           width: "" + derived.size[0] + "px" , 
+	           height: "" + derived.size[1] + "px" , 
+          });
+          derived.cache.width = derived.size[0];
+          derived.cache.height = derived.size[1];
+        }
+        imgTag.html(derived.cache).removeClass('spinner');
+      }
+      
+    });
+
+    //]]>
+  </script>
+</head>
+<body>
+  <div id="desktop" >
+    <div id="title" class="topbar" ></div>
+    <div id="main" ></div>
+    <div id="control">
+    	<table>
+    	<tbody>
+		  <tr>
+		    <th>&nbsp;</th>
+		    <td id="up" class="arrow hideonfirst">&uarr;</td>
+		    <th>&nbsp;</th>
+		  </tr>
+		  <tr>
+		    <td id="left" class="arrow hideonfirst">&larr;</td>
+		    <td id="down" class="arrow hideonlast">&darr;</td>
+		    <td id="right" class="arrow hideonlast">&rarr;</td>
+		  </tr>
+    	</tbody>
+		</table>
+    </div>
+    <div id="log">
+    	<pre />
+    </div>
+  </div>
+</body>
+</html>
