@@ -41,8 +41,20 @@
 	font-family: sans-serif;
 }
 
+#loading {
+	position: absolute;
+}
+
 .spinner {
     background: url('spinner.gif') no-repeat center center;
+}
+.albumtitle {
+	position: absolute;
+	color: #EEE;
+	padding: 0px 4px 0px 4px;
+	font-size: 12px;
+	font-family: sans-serif;
+    text-shadow: 3px 3px 3px #222;
 }
 
 .photos {
@@ -52,7 +64,8 @@
 .photos img {
 	width: 100%;
 	height: 100%;
-};
+}
+
 </style>
 <script type="text/javascript" src="jquery.js" ></script>
 <script type="text/javascript" src="cache.js" ></script>
@@ -63,6 +76,8 @@
       var topBar = 100 ;
       var viewSize = 1024 ;
       var margin = 80 ;
+      
+      var loadingIndex = {};
 
       var rootUrl = location.href.replace(/#[^#]+$/,"");
       var cache = new Cache ( 128 );
@@ -70,6 +85,19 @@
       var displayedImages = null;
 	  var zoomedImage = null;
 
+	  var columnCount ;
+      var gap ;
+	  function calculateColumnCount(){
+	      columnCount = parseInt( $(window).width() / ( cell + margin ) );
+	      gap = parseInt( ($(window).width() - columnCount * cell)/(columnCount+1) );
+		  $("#loading").css({
+		    top: 0,
+		  	left: $(window).width()-gap-margin,
+		    width: margin,
+		  	height: margin,
+		  });
+	  }
+	  calculateColumnCount();
       var resizeTimeout;
       $(window).resize(function(){
         clearTimeout(resizeTimeout);
@@ -98,8 +126,11 @@
         if( v ){
           callback(v);
         }else{
-	   		var baseUrl = rootUrl + album + "/";
+          	loadingIndex[k]=1;
+	        updateLoading();
+          	var baseUrl = rootUrl + album + "/";
 	   		$.getJSON(baseUrl+"index.json", function (out){
+	   		  out.album = album ;
 	   		  out.baseUrl = baseUrl;  
 	          cache.setItem(k, out, 
 	              {expirationAbsolute: null,   
@@ -107,14 +138,36 @@
 	          	   priority: CachePriority.High,  
 	               callback: null
 	          });
+	          delete loadingIndex[k];
+	          updateLoading();
 	          callback(out);
 	        });   
    	  	}
 	  }
    	  
+   	  function updateLoading(){
+   	   if( Object.keys(loadingIndex).length ){
+   	     $("#loading").addClass("spinner");
+   	   }else{
+   	     $("#loading").removeClass("spinner");
+   	   }
+   	  }
+   	  
+   	  function findHighlight(index){
+   	    for( var i = 0 ; i < index.images.length ; i++ ){
+   	      if( index.images[i].highlight ){
+   	        return index.images[i];
+   	      }
+   	    }
+   	    return index.images[0];
+   	  }
+   	  
    	  function findImage(n,callback){
    	    if(n.type=="album"){
-   	      getIndex(n.name,function(index){findImage(setUpImage(index, index.highlight),callback);})
+   	      getIndex(n.name,function(index){
+   	        n.title=index.title;
+   	        findImage(setUpImage(index, findHighlight(index)),callback);
+  	      });
    	    }else{
    	      callback(n);
    	    }
@@ -191,8 +244,9 @@
    	  function displayImages() {
        var list = "";
 	   $("#title").css({height: topBar})
-	   .html("<div id='titletext'>"+displayedImages.title+"</div>" + ( !displayedImages.parent ? "" :
-	       "Parent album: <a href='"+rootUrl+"#"+displayedImages.parent+"'> "+displayedImages.parent+"</a>" )
+	   .html("<div id='titletext'>"+displayedImages.title+"</div>" + 
+	       ( !displayedImages.parent && !displayedImages.album ? "" :
+	       "Parent album: <a href='"+rootUrl+"#"+(displayedImages.parent?displayedImages.parent:"")+"'> "+( displayedImages.parent ? displayedImages.parent : "root" ) +"</a>" )
 	       );
  	   $("#control").css("display", "none");
 	   $(window).scrollTop(0);
@@ -221,12 +275,15 @@
          img.isSpinner = function() { return $("#"+this.divid()).is(".spinner");}
 
          list += "<div class='photos spinner' id='"+img.divid()+"' />";
+         if(img.type == "album" ){
+           list += "<div class='albumtitle' id='t_"+img.divid()+"'></div>";
+         }
          img.initialized=false;
          img.initInternal = function(){
            if(this.thumb == null){
 	           this.thumb={};
 	           this.thumb.size = this.o.calcWidth(cell);
-	           this.thumb.src = this.o.resizeToUrl(this.thumb.size[0]);
+	           this.thumb.src = this.o.resizeToUrl(this.thumb.size[0],this.thumb.size[1]);
            }
            $("#"+this.divid()).click(function(){
               var img = displayedImages.images[parseInt(this.id.substring(3))];
@@ -279,9 +336,21 @@
    	    if(!img.baseUrl){
   	     if(img.type=="image"){
 	   	   img.baseUrl = index.baseUrl ;
-	       img.resizeToUrl = function(w){ 
-	         return this.baseUrl + this.name +".resize_to."+w+"x0"+ this.ext;
-	       }
+	   	   var o = img.exif.Orientation ;
+	   	   if( !img.applyRotation || o == 1 ){
+		       img.resizeToUrl = function(w,h){ 
+		         return this.baseUrl + this.name +".resize_to."+w+"x0"+ this.ext;
+		       }
+	   	   }else{
+	   	     if( o  > 4 ){
+	   	     	var swap = img.height ;
+	   	     	img.height = img.width ;
+	   	     	img.width = swap;
+	   	     }
+	         img.resizeToUrl = function(w,h){
+	           return this.baseUrl + this.name + ".resize_to." + w + "x"+h+"r" + this.exif.Orientation + this.ext;
+	         }
+	   	   }
 	       img.calcWidth = function(max){ 
              return this.width < this.height ? [parseInt( this.width * max / this.height ),max] : [max,parseInt( this.height * max / this.width)]; 
            }
@@ -303,13 +372,11 @@
        }
    	 }
 
-   	var columnCount = null;
    	
    	function recalculateThumbPositions(){
        if( displayedImages != null ){
 		 var w = $(window);
-         columnCount = parseInt( w.width() / ( cell + margin ) );
-         var gap = parseInt( (w.width() - columnCount * cell)/(columnCount+1) );
+		 calculateColumnCount();
          var top = topBar;
          var lastRow = 0 ;
          var maxHeightOnRow = 0 ;
@@ -366,11 +433,24 @@
 	           top: "" + img.thumb.position[1] + "px" ,
 	           "z-index" : "1", 
 	         });
+             
+             if(img.type == "album"){
+               $("#t_"+img.divid())
+	             .html(img.title)
+	             .css({
+	  	           width: "" +img.thumb.size[0] + "px" ,
+	  	           height: "" +20 + "px" ,
+	  	           left: "" +img.thumb.position[0] + "px" ,
+	  	           top: "" + (img.thumb.position[1]+img.thumb.size[1]-20) + "px" ,
+	  	           "z-index" : "2", 
+	  	         });
+             }
+
              elem.fadeTo(0,zoomedImage != null? 0.3 : 1);
            }else{
 		     if(img.sized == null){
 		       img.sized = {} ;
-		       img.sized.src = img.o.resizeToUrl(viewSize) ;
+		       img.sized.src = img.o.resizeToUrl(viewSize,viewSize) ;
 		       downloadImage(img.sized, img);
 		     }
 			 var w = $(window);
@@ -467,6 +547,7 @@
 <body>
   <div id="desktop" >
     <div id="title" class="topbar" ></div>
+    <div id="loading" ></div>
     <div id="main" ></div>
     <div id="control">
     	<table>
